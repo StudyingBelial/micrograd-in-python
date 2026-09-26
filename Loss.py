@@ -2,7 +2,7 @@ import numpy as np
 
 def MSE(prediction, target):
     diff = prediction - target
-    return diff * diff
+    return (diff ** 2).mean()
 
 def CrossEntropy(prediction, target):
     loss = -target * prediction.log()
