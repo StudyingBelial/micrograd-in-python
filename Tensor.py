@@ -3,6 +3,8 @@ import numpy as np
 from helper_fucntions import unbroadcast
 
 class Tensor:
+    __array_priority__ = 1000
+
     def __init__(self, data):
         self.data = np.asarray(data, dtype=np.float64)
         self._prev = set()
@@ -36,8 +38,18 @@ class Tensor:
         out._prev = {self, other}
 
         def _backward():
-            self_grad = out.grad @ np.swapaxes(other.data, -1, -2)
-            other_grad = np.swapaxes(self.data, -1, -2) @ out.grad
+
+            if self.data.ndim == 1 and other.data.ndim == 1:
+                self_grad = out.grad * other.data
+                other_grad = out.grad * self.data
+            elif self.data.ndim == 1 and other.data.ndim == 2:
+                self_grad = out.grad @ other.data.T
+                other_grad = np.outer(self.data, out.grad)
+            else:
+                def safe_T(arr):
+                    return np.swapaxes(arr, -1, -2) if arr.ndim >= 2 else arr
+                self_grad = out.grad @ safe_T(other.data)
+                other_grad = safe_T(self.data) @ out.grad
 
             self.grad += unbroadcast(self_grad, self.data.shape)
             other.grad += unbroadcast(other_grad, other.data.shape)
@@ -51,12 +63,12 @@ class Tensor:
 
         def _backward():
             grad = out.grad
-
-            if axis is not None:
-                if not keepdims:
-                    axes = (axis,) if isinstance(axis, int) else axis
-                    for ax in sorted(axes):
-                        grad = np.expand_dims(grad, ax)
+            if axis is not None and not keepdims:
+                shape_with_kept_dims = list(self.data.shape)
+                axes = (axis,) if isinstance(axis, int) else axis
+                for ax in axes:
+                    shape_with_kept_dims[ax % self.data.ndim] = 1
+                grad = np.reshape(grad, shape_with_kept_dims)
 
             self.grad += np.broadcast_to(grad, self.data.shape)
 
@@ -120,8 +132,7 @@ class Tensor:
             
         out._backward = _backward
         return out
-            
-    
+
     def __pow__(self, other):
         out = Tensor(self.data ** other)
         out._prev = {self}
@@ -132,12 +143,23 @@ class Tensor:
         out._backward = _backward
         return out
     
-    def log(self):
-        out = Tensor(np.log(self.data))
+    def log(self, eps=1e-8):
+        safe_data = np.clip(self.data, eps, None)
+        out = Tensor(np.log(safe_data))
         out._prev = {self}
                 
         def _backward():
             self.grad += (1 / self.data) * out.grad
+            
+        out._backward = _backward
+        return out
+
+    def __neg__(self):
+        out = Tensor(-self.data)
+        out._prev = {self}
+        
+        def _backward():
+            self.grad -= out.grad
             
         out._backward = _backward
         return out
@@ -204,6 +226,24 @@ class Tensor:
         
         out._backward = _backward
         return out
+    
+    def dropout(self, dropout_rate, training=True):
+        if not training or dropout_rate == 0.0:
+            return self
+        
+        mask = (np.random.rand(*self.data.shape) > dropout_rate).astype(self.data.dtype)
+        
+        scale = 1.0 / (1.0 - dropout_rate)
+        mask = mask * scale
+        
+        out = Tensor(self.data * mask)
+        out._prev = {self}
+        
+        def _backward():
+            self.grad += mask * out.grad
+        
+        out._backward = _backward
+        return out
 
     def backward(self, grad=None):
         topo = []
@@ -217,6 +257,6 @@ class Tensor:
                 topo.append(v)
         build(self)
         
-        self.grad = 1.0 if grad is None  else grad
+        self.grad = np.ones_like(self.data) if grad is None else grad
         for node in reversed(topo):
             node._backward()
