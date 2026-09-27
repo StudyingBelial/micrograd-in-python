@@ -149,7 +149,7 @@ class Tensor:
         out._prev = {self}
                 
         def _backward():
-            self.grad += (1 / self.data) * out.grad
+            self.grad += (1 / safe_data) * out.grad
             
         out._backward = _backward
         return out
@@ -175,6 +175,9 @@ class Tensor:
     
     def __rtruediv__(self, other):
         return Tensor(other) / self if not isinstance(other, Tensor) else other / self
+
+    def __rmatmul__(self, other):
+        return Tensor(other) @ self
 
     def relu(self):
         out = Tensor(np.maximum(0, self.data))
