@@ -37,3 +37,11 @@ class Base:
         for l in self.layers:
             params.extend(l.parameters())
         return params
+
+    def train(self, mode=True):
+        for l in self.layers:
+            if hasattr(l, 'training'):
+                l.training = mode
+
+    def eval(self):
+        self.train(False)
