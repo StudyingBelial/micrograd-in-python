@@ -1,6 +1,6 @@
 import numpy as np
 
-from helper_fucntions import unbroadcast
+from helper_functions import unbroadcast
 
 class Tensor:
     __array_priority__ = 1000
